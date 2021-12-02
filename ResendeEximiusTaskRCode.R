@@ -11,7 +11,7 @@ library(ggplot2)
 library(gridExtra)
 library(broom.mixed)
 library(car)
-library(MASS)
+library(DHARMa)
 
 #Load data
 resende_data = read.table("ResendeEximiusTaskData.txt", header=T)
@@ -34,12 +34,6 @@ summary(resende_data)
 
 #Note that the analysis requires certain subsets to be made (these are performed in the code before the given model is run) 
 #such that, for example, only resting spiders are compared for whether they are resting in an exposed vs protected position
-
-#Histogram of latency scores from the source colony individuals
-fig3 = ggplot(resende_data, aes(x= latency)) + 
-  geom_histogram(aes(y = ..density..), color = "gray", fill = "white") +
-  geom_density(fill = "black", alpha = 0.2) + theme_classic() +
-  xlab("Seconds to move after air puff") + ylab("Frequency Density")
 
 #Analysis of location####
 
@@ -100,28 +94,32 @@ resende_data_r = resende_data_b %>%
 #and those not in sail (which we filtered for earlier), as spiders in sail are very rarely resting
 
 exposed_m1 = glmmTMB(rest_exp ~ scale(latency) * space + scale(log(bask_vol)) +
-                    (1|web/web_ind) +  (1|date), family = binomial,
-                  resende_data_r)
+                       (1|web/web_ind) +  (1|date), family = binomial,
+                     resende_data_r)
 
-summary(exposed_m1)
+sim_exposed_m1 = simulateResiduals(exposed_m1)
+plot(sim_exposed_m1, asFactor=F) #gives sig deviations and warning messages. 
+#True even when date or basket volume are excluded, worse when basket vol excluded
 
-Anova(exposed_m1, type=2)
+testDispersion(exposed_m1) #under dispersed
 
-tidy(exposed_m1, effects="ran_pars", conf.int =T, conf.method = "Wald")
+#as such I do not believe we can use this model
 
-exp(fixef(exposed_m1)[[1]])
-
-confint(exposed_m1)
+# summary(exposed_m1)
+# 
+# Anova(exposed_m1, type=2)
+# 
+# tidy(exposed_m1, effects="ran_pars", conf.int =T, conf.method = "Wald")
 
 #If active, taking care of young vs other
 
-resende_data_a = resende_data %>%
+resende_data_a = resende_data_b %>% #care only takes place in the basket
   filter(active == 1) #only want active spiders
   
-care_m1 = glmmTMB(care_young ~ scale(latency) + space + 
-                       (1|web/web_ind) +  (1|date), family = binomial,
-                     resende_data_a)
-summary(care_m1) #Note the model does not converge if we include web volume
+care_m1 = glmmTMB(care_young ~ scale(latency) * space + scale(log(bask_vol)) +
+                    (1|web/web_ind) +  (1|date), family = binomial,
+                  resende_data_a)
+summary(care_m1) 
 
 Anova(care_m1, type=2)
 
@@ -132,6 +130,9 @@ exp(fixef(care_m1)[[1]])
 confint(care_m1)
 
 #If active, walking vs other
+
+resende_data_w = resende_data %>% 
+  filter(active == 1) #only want active spiders
 
 walk_m1 = glmmTMB(walk ~ scale(latency) * space + scale(log(bask_vol)) +
                     (1|web/web_ind) +  (1|date), family = binomial,
@@ -164,7 +165,7 @@ fig4b = ggplot(resende_data, aes(x = latency, y = edge_b)) +
   xlab("Seconds to move after air puff") + ylab("Chance of being on edge of basket")+
   stat_smooth(method = "glm", se=T, method.args = list(family = "binomial"), col="black")
 
-grid.arrange(fig3a, fig3b, ncol=2)
+grid.arrange(fig4a, fig4b, ncol=2)
 
 #Figure 5, Latency on activity
 
@@ -174,28 +175,29 @@ fig5a = ggplot(resende_data, aes(x = latency, y = active)) +
   xlab("Seconds to move after air puff") + ylab("Chance of being active")+
   stat_smooth(method = "glm", se=T, method.args = list(family = "binomial"), col="black")
 
-fig5b = ggplot(resende_data_r, aes(x = latency, y = rest_exp)) +
-  geom_jitter(height = 0.01, width = 0.01) + theme_classic()+
-  xlab("Seconds to move after air puff") + ylab("Chance of resting in exposed position")+
-  stat_smooth(method = "glm", se=T, method.args = list(family = "binomial"), col="black")
-
-fig5c = ggplot(resende_data_a, aes(x = latency, y = care_young)) +
+fig5b = ggplot(resende_data_a, aes(x = latency, y = care_young)) +
   geom_jitter(height = 0.01, width = 0.01) + theme_classic()+
   xlab("Seconds to move after air puff") + ylab("Chance of taking care of young compared to other activity")+
   stat_smooth(method = "glm", se=T, method.args = list(family = "binomial"), col="black")
 
-fig5d = ggplot(resende_data_a, aes(x = latency, y = walk)) +
+fig5c = ggplot(resende_data_a, aes(x = latency, y = walk)) +
   geom_jitter(height = 0.01, width = 0.01) + theme_classic()+
   xlab("Seconds to move after air puff") + ylab("Chance of walking compared to other activity")+
   stat_smooth(method = "glm", se=T, method.args = list(family = "binomial"), col="black")
 
-grid.arrange(fig5a, fig5b, fig5c, fig5d, ncol=2)
+grid.arrange(fig5a, fig5b, fig5c, ncol=3)
+
+#Histogram of latency scores from the source colony individuals
+fig3 = ggplot(resende_data, aes(x= latency)) + 
+  geom_histogram(aes(y = ..density..), color = "gray", fill = "white") +
+  geom_density(fill = "black", alpha = 0.2) + theme_classic() +
+  xlab("Seconds to move after air puff") + ylab("Frequency Density")
 
 #Figure in Appendix 2, Web volume vs in/out basket
 
 appen2 = ggplot(resende_data, aes(x = (bask_vol),y = sail)) +
   geom_jitter(height = 0.01, width = 0.01) + theme_classic()+
-  xlab("Web basket volume (m³)") + ylab("Chance of being out of basket")+
+  xlab("Web basket volume (mÂ³)") + ylab("Chance of being out of basket")+
   stat_smooth(method = "glm", se=T, method.args = list(family = "binomial"), col="black")
 
 #####END OF CODE####
